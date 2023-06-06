@@ -3,7 +3,7 @@
 # Сommands:
 1. /start - Start the bot.
 2. /help - Show available commands.
-3. /anecdote - Get a random anecdote. Site that used for this command https://randomfilm.ru/ .
+3. /anecdote - Get a random anecdote. Site that used for this command https://www.anekdot.ru/last/good/ .
 4. /random - Generate a random number from 1 to 100.
 5. /randommovieinfo - Get a random movie with its information. Site that used for this command https://randomfilm.ru/ .
 6. /vote - Create a poll "What is your favorite movie?".
