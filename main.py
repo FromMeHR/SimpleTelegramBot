@@ -16,7 +16,7 @@ def parser(url):
     soup = bs(r.text, 'html.parser')
     anekdots = soup.find_all('div', class_='text')
     return [c.text for c in anekdots]
-def process_number_input(message):
+def process_number_input_joke(message):
     try:
         number = int(message.text)
         if 1 <= number <= 9:
@@ -26,6 +26,36 @@ def process_number_input(message):
             bot.send_message(message.chat.id, "Invalid number. Enter a number from 1 to 9.")
     except ValueError:
         bot.send_message(message.chat.id, "Invalid input. Enter a number from 1 to 9.")
+def process_number_input_movie(message):
+    try:
+        number = int(message.text)
+        if 1 <= number <= 10:
+            movie_info = top10_movies_info[number - 1]
+            if movie_info[3]:
+                response = requests.get(movie_info[3])
+                image = Image.open(BytesIO(response.content))
+                new_size = (166, 250)
+                image = image.resize(new_size)
+                image_buffer = BytesIO()
+                image.save(image_buffer, format='JPEG')
+                image_buffer.seek(0)
+                bot.send_photo(message.chat.id, image_buffer)
+            else:
+                bot.send_message(message.chat.id, "Movie poster's not available.")
+            bot.send_message(message.chat.id, "Title: " + movie_info[0])
+            bot.send_message(message.chat.id, "Year: " + str(movie_info[1]))
+            bot.send_message(message.chat.id, "Rating: " + str(movie_info[5]))
+
+            if isinstance(movie_info[4], list):
+                country = ', '.join(movie_info[4])
+            else:
+                country = str(movie_info[4])
+            bot.send_message(message.chat.id, "Country: " + country)
+            bot.send_message(message.chat.id, "Genres: " + movie_info[2])
+        else:
+            bot.send_message(message.chat.id, "Invalid number. Enter a number from 1 to 10.")
+    except ValueError:
+        bot.send_message(message.chat.id, "Invalid input. Enter a number from 1 to 10.")
 def get_random_movie_info():
     url = 'https://randomfilm.ru/'
     r = requests.get(url)
@@ -59,12 +89,47 @@ def get_random_movie_info():
         translated_genre = translator.translate(genre)
 
     return title, full_path, year, translated_country, translated_genre
+def get_top10_movies_info():
+    movies = imdb.get_top250_movies()[:10]
+    movie_info_list = []
+    for movie in movies:
+        imdb.update(movie)
+        title = movie.get('title', 'Unknown')
+        year = movie.get('year', 'Unknown')
+        country = movie.get('country', 'Unknown')
+        genres = ', '.join(movie.get('genres', []))
+        cover_url = movie.get('cover url')
+        rating = movie.get('rating', 'Unknown')
+        movie_info_list.append((title, year, genres, cover_url, country, rating))
 
+    return movie_info_list
+def get_random_topical_movie_info():
+    url = 'https://www.imdb.com/chart/moviemeter/?ref_=tt_ov_pop'
+    r = requests.get(url)
+    html = bs(r.content, 'html.parser')
+
+    table = html.find('tbody', class_='lister-list')
+    movies = table.find_all('tr')
+    random_index = random.randint(0, len(movies) - 1)
+    random_movie = movies[random_index]
+    title_column = random_movie.find('td', class_='titleColumn')
+    poster_column = random_movie.find('td', class_='posterColumn')
+    rating_column = random_movie.find('td', class_='ratingColumn imdbRating')
+    title = title_column.a.text.strip()
+    translator = Translator(from_lang='uk', to_lang='en')
+    title = translator.translate(title)
+
+    poster_url = poster_column.find('img')['src']
+    year = title_column.find('span', class_='secondaryInfo').text.strip('()')
+    rank = poster_column.find('span', {'name': 'rk'})['data-value']
+    rating = rating_column.strong.text.strip() if rating_column.strong else 'N/A'
+    return title, year, poster_url, rating, rank
+
+imdb = IMDb()
 list_of_jokes = parser(URL)
 random.shuffle(list_of_jokes)
 
 bot = telebot.TeleBot(API_Key)
-
 @bot.message_handler(func=lambda message: message.text.lower() == '/start')
 def hello(message):
     user_name = message.from_user.first_name
@@ -77,6 +142,8 @@ def help_command(message):
         "/anecdote - Get a random anecdote",
         "/random - Generate a random number from 1 to 100",
         "/randommovieinfo - Get a random movie with its information",
+        "/randomtopicalmovieimdb - Get a random current popular movie from IMDb",
+        "/top10moviesimdb - Get information about one movie from IMDb's Top 10 Movies (wait half a minute)",
         "/vote - Create a poll \"What is your favorite movie?\"",
         "/play_tanks - Tanks: battle game 1vs1"
     ]
@@ -91,6 +158,37 @@ def anecdote_command(message):
         bot.register_next_step_handler(message, process_number_input)
     else:
         bot.send_message(message.chat.id, "No more anecdotes available. Enter /help for available commands.")
+@bot.message_handler(commands=['top10moviesimdb'])
+def top10_movies_imdb_command(message):
+    global top10_movies_info
+    top10_movies_info = get_top10_movies_info()
+
+    if len(top10_movies_info) > 0:
+        markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, selective=True)
+        numbers = [str(i) for i in range(1, 11)]
+        markup.add(*numbers)
+        bot.send_message(message.chat.id, "Enter a number from 1 to 10:", reply_markup=markup)
+        bot.register_next_step_handler(message, process_number_input_movie)
+    else:
+        bot.send_message(message.chat.id, "No movies available. Enter /help for available commands.")
+@bot.message_handler(commands=['randomtopicalmovieimdb'])
+def random_topical_movie_imdb_command(message):
+    movie_info = get_random_topical_movie_info()
+    if movie_info[2]:
+        response = requests.get(movie_info[2])
+        image = Image.open(BytesIO(response.content))
+        new_size = (100, 160)
+        image = image.resize(new_size)
+        image_buffer = BytesIO()
+        image.save(image_buffer, format='JPEG')
+        image_buffer.seek(0)
+        bot.send_photo(message.chat.id, image_buffer)
+    else:
+        bot.send_message(message.chat.id, "Movie poster's not available.")
+    bot.send_message(message.chat.id, "Title: " + movie_info[0])
+    bot.send_message(message.chat.id, "Year: " + str(movie_info[1]))
+    bot.send_message(message.chat.id, "Rating: " + movie_info[3])
+    bot.send_message(message.chat.id, "Current popularity rank: " + movie_info[4])
 @bot.message_handler(commands=['random'])
 def random_command(message):
     random_number = random.randint(1, 100)
@@ -109,7 +207,7 @@ def random_movie_info_command(message):
     bot.send_photo(message.chat.id, image_buffer)
     response += f"Year: {year}\n"
     response += f"Country: {country}\n"
-    response += f"Genre: {genre}\n"
+    response += f"Genres: {genre}\n"
     bot.send_message(message.chat.id, response)
 @bot.message_handler(commands=['vote'])
 def poll_command(message):
@@ -121,15 +219,18 @@ class Tank:
     def __init__(self, name, hp):
         self.name = name
         self.hp = hp
+        self.initial_hp = hp
     def take_damage(self, damage):
         self.hp -= damage
         if self.hp < 0:
             self.hp = 0
     def is_alive(self):
         return self.hp > 0
+    def reset_health(self):
+        self.hp = self.initial_hp
 available_tanks = {
     "ИС-2": Tank("ИС-2", 800),
-    "T-34": Tank("T-34", 600),
+    "Т-34": Tank("Т-34", 600),
     "КВ-2": Tank("КВ-2", 650)
 }
 
@@ -140,7 +241,9 @@ player_tank = None
 def start_game(message):
     global player_tank, enemy_tank
     player_tank = None
-    enemy_tank.hp = 800
+    enemy_tank.reset_health()
+    for tank in available_tanks.values():
+        tank.reset_health()
     bot.send_message(message.chat.id, "Welcome to the Tank Battle game!")
     bot.send_message(message.chat.id, "Available tanks:")
     for tank_name, tank in available_tanks.items():
@@ -201,5 +304,3 @@ def handle_message(message):
 
 keep_alive()
 bot.polling(none_stop=True)
-
-
