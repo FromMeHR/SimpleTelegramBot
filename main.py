@@ -1,6 +1,11 @@
 import requests
 import random
 import telebot
+import pytz
+from geopy.geocoders import Nominatim
+from datetime import datetime
+from timezonefinder import TimezoneFinder
+from imdb import IMDb
 from background import keep_alive
 from bs4 import BeautifulSoup as bs
 from translate import Translator
@@ -8,6 +13,8 @@ from telebot import types
 from PIL import Image
 from io import BytesIO
 
+weather_api = "2a160c093921552181779f7152c68f35"
+geolocator = Nominatim(user_agent="weather_bot")
 API_Key = 'your api'
 URL = 'https://www.anekdot.ru/last/good/'
 r = requests.get(URL)
@@ -124,6 +131,17 @@ def get_random_topical_movie_info():
     rank = poster_column.find('span', {'name': 'rk'})['data-value']
     rating = rating_column.strong.text.strip() if rating_column.strong else 'N/A'
     return title, year, poster_url, rating, rank
+def get_current_time(city):
+    geolocator = Nominatim(user_agent="my-app")
+    location_of_city = geolocator.geocode(city)
+    if location_of_city:
+        tf = TimezoneFinder()
+        latitude, longitude = location_of_city.latitude, location_of_city.longitude
+        timezone = pytz.timezone(tf.timezone_at(lng=longitude, lat=latitude))
+        current_time = datetime.now(timezone)
+        return current_time.strftime("%B %d, %Y %H:%M:%S")
+    else:
+        return "N/A"
 
 imdb = IMDb()
 list_of_jokes = parser(URL)
@@ -140,6 +158,8 @@ def help_command(message):
         "/start - Start the bot",
         "/help - Show available commands",
         "/anecdote - Get a random anecdote",
+        "/weather - Get information about the current weather in a specific city",
+        "/time_in_city - Get current time in a specific city",
         "/random - Generate a random number from 1 to 100",
         "/randommovieinfo - Get a random movie with its information",
         "/randomtopicalmovieimdb - Get a random current popular movie from IMDb",
@@ -155,7 +175,7 @@ def anecdote_command(message):
         numbers = [str(i) for i in range(1, 10)]
         markup.add(*numbers)
         bot.send_message(message.chat.id, "Enter a number from 1 to 9:", reply_markup=markup)
-        bot.register_next_step_handler(message, process_number_input)
+        bot.register_next_step_handler(message, process_number_input_joke)
     else:
         bot.send_message(message.chat.id, "No more anecdotes available. Enter /help for available commands.")
 @bot.message_handler(commands=['top10moviesimdb'])
@@ -214,7 +234,64 @@ def poll_command(message):
     poll_question = "What is your favorite movie?"
     poll_options = ['The Shawshank Redemption (1994)', 'The Godfather (1972)', 'The Dark Knight (2008)', 'Schindler\'s List (1993)']
     options = [telebot.types.PollOption(option, "Option{}".format(index + 1)) for index, option in enumerate(poll_options)]
-    poll = bot.send_poll(message.chat.id, poll_question, options)
+    bot.send_poll(message.chat.id, poll_question, options)
+
+time_in_city = {}
+weather_city = {}
+@bot.message_handler(commands=['time_in_city'])
+def time_in_city_command(message):
+    time_in_city[message.chat.id] = True
+    weather_city[message.chat.id] = False  # сбрасываем user_city
+    bot.send_message(message.chat.id, "Enter the name of a city to get the current time: ")
+@bot.message_handler(commands=["weather"])
+def weather_command(message):
+    weather_city[message.chat.id] = True
+    time_in_city[message.chat.id] = False  # сбрасываем time_in_city1
+    bot.send_message(message.chat.id, "Enter the name of a city in order to get information about weather: ")
+translator = Translator(from_lang='ru', to_lang='en')
+@bot.message_handler(func=lambda message: time_in_city.get(message.chat.id, False))
+def get_time_in_city(message):
+    city = message.text
+    translated_city = translator.translate(city)
+    location_of_city = geolocator.geocode(translated_city)
+    if location_of_city:
+        current_time = get_current_time(translated_city)
+        bot.send_message(message.chat.id, f"Current time in {translated_city}: {current_time}")
+    else:
+        bot.send_message(message.chat.id, "Wrong city name")
+    time_in_city[message.chat.id] = False
+
+@bot.message_handler(func=lambda message: weather_city.get(message.chat.id, False))
+def get_weather_info(message):
+    code_to_smile = {
+        "Clear": "Clear ☀️",
+        "Clouds": "Cloudy ☁️",
+        "Drizzle": "Drizzle ☔",
+        "Rain": "Rainy ☔",
+        "Thunderstorm": "Thunderstorm ⚡",
+        "Mist": "Mist 🌫️",
+        "Snow": "Snow ❄️"
+    }
+    try:
+        r = requests.get(
+            f"http://api.openweathermap.org/data/2.5/weather?q={message.text}&appid={weather_api}&units=metric"
+        )
+        data = r.json()
+        city = data["name"]
+        current_weather = data["main"]["temp"]
+        weather_info = data["weather"][0]["main"]
+        if weather_info in code_to_smile:
+            wd = code_to_smile[weather_info]
+        else:
+            wd = "I can't determine the weather"
+        humidity = data["main"]["humidity"]
+        wind = data["wind"]["speed"]
+        bot.reply_to(message, f"Weather in {city}:\nTemperature: {current_weather}°C {wd}\n"
+                             f"Humidity: {humidity}%\nWind: {wind} m/s\n")
+
+        weather_city[message.chat.id] = False
+    except:
+        bot.reply_to(message, "Wrong city name")
 class Tank:
     def __init__(self, name, hp):
         self.name = name
