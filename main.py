@@ -110,27 +110,56 @@ def get_top10_movies_info():
         movie_info_list.append((title, year, genres, cover_url, country, rating))
 
     return movie_info_list
-def get_random_topical_movie_info():
-    url = 'https://www.imdb.com/chart/moviemeter/?ref_=tt_ov_pop'
+def get_random_topical_movie_in_theaters():
+    url = 'https://www.rottentomatoes.com/browse/movies_in_theaters/critics:certified_fresh~sort:popular'
     r = requests.get(url)
     html = bs(r.content, 'html.parser')
+    movie_links = html.find_all('div', class_='js-tile-link')
+    image_links = []
+    movie_titles = []
+    release_dates = []
+    critics_scores = []
+    movie_urls = []
+    for link in movie_links:
+        img_tag = link.find('img', class_='posterImage')
+        src = img_tag['src']
+        image_links.append(src)
+        title_tag = link.find('span', {'class': 'p--small', 'data-qa': 'discovery-media-list-item-title'})
+        movie_title = title_tag.get_text(strip=True)
+        movie_titles.append(movie_title)
+      
+        date_tag = link.find('span', {'class': 'smaller', 'data-qa': 'discovery-media-list-item-start-date'})
+        release_date = date_tag.get_text(strip=True).replace('Opened ', '')
+        release_dates.append(release_date)
+      
+        score_tag = link.find('score-pairs')
+        critics_score = score_tag['criticsscore']
+        critics_scores.append(critics_score)
+      
+        url_tag = link.find('a', {'data-qa': 'discovery-media-list-item-caption'})
+        movie_url = url_tag['href']
+        movie_urls.append(movie_url)
+    random_index = random.randint(0, len(movie_titles) - 1)
+    random_image_link = image_links[random_index]
+    random_movie_title = movie_titles[random_index]
+    random_release_date = release_dates[random_index]
+    random_critics_score = critics_scores[random_index]
+    random_critics_score_percent = f"{random_critics_score}%"
+    random_movie_url = movie_urls[random_index]
+    full_movie_url = f"https://www.rottentomatoes.com{random_movie_url}"
 
-    table = html.find('tbody', class_='lister-list')
-    movies = table.find_all('tr')
-    random_index = random.randint(0, len(movies) - 1)
-    random_movie = movies[random_index]
-    title_column = random_movie.find('td', class_='titleColumn')
-    poster_column = random_movie.find('td', class_='posterColumn')
-    rating_column = random_movie.find('td', class_='ratingColumn imdbRating')
-    title = title_column.a.text.strip()
-    translator = Translator(from_lang='uk', to_lang='en')
-    title = translator.translate(title)
-
-    poster_url = poster_column.find('img')['src']
-    year = title_column.find('span', class_='secondaryInfo').text.strip('()')
-    rank = poster_column.find('span', {'name': 'rk'})['data-value']
-    rating = rating_column.strong.text.strip() if rating_column.strong else 'N/A'
-    return title, year, poster_url, rating, rank
+    movie_info_response = requests.get(full_movie_url)
+    movie_info_html = bs(movie_info_response.content, 'html.parser')
+    genre_tag = movie_info_html.find('b', {'class': 'info-item-label', 'data-qa': 'movie-info-item-label'}, string='Genre:')
+    if genre_tag:
+        genre_value_tag = genre_tag.find_next_sibling('span', {'class': 'info-item-value', 'data-qa': 'movie-info-item-value'})
+        if genre_value_tag:
+            genre = " ".join(genre_value_tag.get_text(strip=True).split())
+        else:
+            genre = "N/A"
+    else:
+        genre = "N/A"
+    return random_movie_title, random_release_date, random_image_link, random_critics_score_percent, genre
 def get_current_time(city):
     geolocator = Nominatim(user_agent="my-app")
     location_of_city = geolocator.geocode(city)
@@ -162,7 +191,7 @@ def help_command(message):
         "/time_in_city - Get current time in a specific city",
         "/random - Generate a random number from 1 to 100",
         "/randommovieinfo - Get a random movie with its information",
-        "/randomtopicalmovieimdb - Get a random current popular movie from IMDb",
+        "/random_topical_movie_in_theaters - Get a random fresh movie in theaters from Rotten Tomatoes",
         "/top10moviesimdb - Get information about one movie from IMDb's Top 10 Movies (wait half a minute)",
         "/vote - Create a poll \"What is your favorite movie?\"",
         "/play_tanks - Tanks: battle game 1vs1"
@@ -191,24 +220,20 @@ def top10_movies_imdb_command(message):
         bot.register_next_step_handler(message, process_number_input_movie)
     else:
         bot.send_message(message.chat.id, "No movies available. Enter /help for available commands.")
-@bot.message_handler(commands=['randomtopicalmovieimdb'])
-def random_topical_movie_imdb_command(message):
-    movie_info = get_random_topical_movie_info()
-    if movie_info[2]:
-        response = requests.get(movie_info[2])
-        image = Image.open(BytesIO(response.content))
-        new_size = (100, 160)
-        image = image.resize(new_size)
-        image_buffer = BytesIO()
-        image.save(image_buffer, format='JPEG')
-        image_buffer.seek(0)
-        bot.send_photo(message.chat.id, image_buffer)
-    else:
-        bot.send_message(message.chat.id, "Movie poster's not available.")
-    bot.send_message(message.chat.id, "Title: " + movie_info[0])
-    bot.send_message(message.chat.id, "Year: " + str(movie_info[1]))
-    bot.send_message(message.chat.id, "Rating: " + movie_info[3])
-    bot.send_message(message.chat.id, "Current popularity rank: " + movie_info[4])
+@bot.message_handler(commands=['random_topical_movie_in_theaters'])
+def random_topical_movie_in_theaters_command(message):
+    movie_info = get_random_topical_movie_in_theaters()
+    response = requests.get(movie_info[2])
+    image = Image.open(BytesIO(response.content))
+    new_size = (166, 250)
+    image = image.resize(new_size)
+    image_buffer = BytesIO()
+    image.save(image_buffer, format='JPEG')
+    image_buffer.seek(0)
+    bot.send_photo(message.chat.id, image_buffer)
+    response = "Title: " + movie_info[0] + "\nRelease Date (Theaters): " + str(movie_info[1]) + "\n"\
+                "Critics' score: " + movie_info[3] + "\nGenres: " + movie_info[4]
+    bot.send_message(message.chat.id, response)
 @bot.message_handler(commands=['random'])
 def random_command(message):
     random_number = random.randint(1, 100)
@@ -241,12 +266,12 @@ weather_city = {}
 @bot.message_handler(commands=['time_in_city'])
 def time_in_city_command(message):
     time_in_city[message.chat.id] = True
-    weather_city[message.chat.id] = False  # сбрасываем user_city
+    weather_city[message.chat.id] = False  # сбрасываем weather_city
     bot.send_message(message.chat.id, "Enter the name of a city to get the current time: ")
 @bot.message_handler(commands=["weather"])
 def weather_command(message):
     weather_city[message.chat.id] = True
-    time_in_city[message.chat.id] = False  # сбрасываем time_in_city1
+    time_in_city[message.chat.id] = False  # сбрасываем time_in_city
     bot.send_message(message.chat.id, "Enter the name of a city in order to get information about weather: ")
 translator = Translator(from_lang='ru', to_lang='en')
 @bot.message_handler(func=lambda message: time_in_city.get(message.chat.id, False))
